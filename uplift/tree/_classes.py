@@ -1,8 +1,10 @@
 import numbers
 from abc import ABCMeta, abstractmethod
 
+import numpy as np
 from sklearn.base import BaseEstimator, is_classifier
 from sklearn.utils import check_X_y, check_random_state, check_scalar
+from sklearn.utils.validation import check_is_fitted
 
 from . import _criterion, _splitter
 from ._tree import Tree, DepthFirstTreeBuilder, BestFirstTreeBuilder
@@ -45,7 +47,6 @@ class BaseDecisionTree(BaseEstimator, UpliftMixin, metaclass=ABCMeta):
         X, y = self._validate_data(X, y, force_all_finite='allow-nan')
         _, w = check_X_y(X, w, force_all_finite='allow-nan')
 
-        _, self.n_features_in_ = X.shape
         is_classification = is_classifier(self)
 
         max_depth = np.iinfo(np.int32).max if self.max_depth is None else self.max_depth
@@ -135,6 +136,8 @@ class BaseDecisionTree(BaseEstimator, UpliftMixin, metaclass=ABCMeta):
         return self
 
     def predict(self, X):
+        check_is_fitted(self)
+
         X = self._validate_data(X, reset=False,
                                 force_all_finite='allow-nan')
         return self.tree_.apply(X)
