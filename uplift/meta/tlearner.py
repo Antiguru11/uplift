@@ -31,7 +31,7 @@ class TLearner(BaseLearner):
 
         self.estimators[group - 1] = (estimator_t, estimator_c)
 
-    def _predict_group(self, group, X, p_score, **kwargs):
+    def _predict_group(self, group, X, **kwargs):
         estimator_t = self.estimators[group - 1][0]
         estimator_c = self.estimators[group - 1][1]
 

@@ -25,7 +25,7 @@ class SLearner(BaseLearner):
 
         self.estimators[group - 1] = estimator
 
-    def _predict_group(self, group, X, p_score, **kwargs):
+    def _predict_group(self, group, X, **kwargs):
         n_samples, _ = X.shape
 
         w_shape = (n_samples, 1)

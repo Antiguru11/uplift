@@ -1,8 +1,7 @@
 from abc import ABCMeta, abstractmethod
 
 import numpy as np
-from sklearn.base import (BaseEstimator,
-                          MetaEstimatorMixin,
+from sklearn.base import (MetaEstimatorMixin,
                           is_classifier,
                           clone,)
 from sklearn.utils import check_scalar
@@ -20,7 +19,7 @@ class BaseLearner(BaseEstimator,
                  estimator,
                  *,
                  estimators_params: list,
-                 propencity: bool=False,
+                 propencity: bool = False,
                  propencity_score=None,
                  propencity_estimator=None,
                  random_state: int = None):
@@ -41,7 +40,6 @@ class BaseLearner(BaseEstimator,
         else:
             self.estimators_params = ('estimator',)
             
-
     @abstractmethod
     def _check_params(self):
         params = dict()
@@ -84,6 +82,8 @@ class BaseLearner(BaseEstimator,
         params['fit_params'] = fit_params
         
         self.estimators = [tuple() for i in range(self.n_groups)]
+        if self.propencity_estimator is not None:
+            self.p_estimators = [tuple() for i in range(self.n_groups)]
         for group in self.groups:
             Xg = X[(w == group) | (w == 0)]
             yg = y[(w == group) | (w == 0)]
@@ -118,34 +118,36 @@ class BaseLearner(BaseEstimator,
         estimator_calib.fit(estimator.predict_proba(X_calib)[:, 1].reshape(-1, 1),
                             w_calib)
 
-        self.estimators[group - 1] = (estimator, estimator_calib)
+        self.p_estimators[group - 1] = (estimator, estimator_calib)
 
     def predict(self, X, **kwargs):
         check_is_fitted(self)
         self._validate_data(X, reset=False, 
-                            force_all_finite=self._get_tags()['allow_nan'])        
+                            force_all_finite=self._get_tags()['allow_nan'])
 
-        predictions = list()
+        n_samples, _ = X.shape
+
+        preds = np.full((n_samples, self.n_groups), np.nan)
         for group in self.groups:
-            p_score = self._predict_propencity(group, X)
-            predictions.append(self._predict_group(group, X, p_score, **kwargs).reshape(-1, 1))
-        if len(predictions) == 1:
-            return predictions[0].reshape(-1)
-        else:
-            return np.hstack(predictions)
+            preds[:, group - 1] = self._predict_group(group, X, **kwargs)
+        
+        if self.n_groups == 1:
+            return preds.reshape(-1)
+        return preds
     
     @abstractmethod
-    def _predict_group(self, group, X, p_score, **kwargs):
+    def _predict_group(self, group, X, **kwargs):
         pass
 
     def _predict_propencity(self, group, X, **kwargs):
         if self.propencity:
             if self.propencity_score is None:
-                estimator, estimator_calib = self.estimators[group - 1][-1]
+                estimator, estimator_calib = self.p_estimators[group - 1]
 
                 pred = estimator.predict_proba(X)[:, 1].reshape(-1, 1)
                 return estimator_calib.predict_proba(pred)[:, 1]
             else:
                 return np.full(X.shape[0], self.propencity_score[group - 1])
-        return None
+        else:
+            raise ValueError('Propencity is not supported')
         

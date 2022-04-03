@@ -1,6 +1,4 @@
 from sklearn.base import is_classifier, clone
-from sklearn.utils import check_scalar, check_random_state
-from sklearn.model_selection import train_test_split
 
 from .base import BaseLearner
 from ..base import RegressorMixin, ClassifierMixin
@@ -36,15 +34,9 @@ class XLearner(BaseLearner):
         self.random_state = random_state
 
     def _check_params(self):
-        params = super()._check_params()
+        return super()._check_params()
 
-        params['random_state'] = check_random_state(self.random_state)
-
-        return params
-
-    def _fit_group(self, group, X, y, w,
-                   random_state,
-                   fit_params):
+    def _fit_group(self, group, X, y, w, fit_params):
         estimator_alpha_t = clone(self.estimator_alpha_t)
         estimator_alpha_c = clone(self.estimator_alpha_c)
         estimator_beta_t = clone(self.estimator_beta_t)
@@ -65,10 +57,9 @@ class XLearner(BaseLearner):
         estimator_beta_t.fit(X[w == 1], dt)
         estimator_beta_c.fit(X[w == 0], dc)
 
-        self.estimators[group - 1] = (estimator_beta_t, estimator_beta_c,
-                                      self.estimators[group - 1])
+        self.estimators[group - 1] = (estimator_beta_t, estimator_beta_c)
 
-    def _predict_group(self, group, X, p_score, **kwargs):
+    def _predict_group(self, group, X, **kwargs):
         estimator_t = self.estimators[group - 1][0]
         estimator_c = self.estimators[group - 1][1]
 
@@ -78,6 +69,8 @@ class XLearner(BaseLearner):
         else:
             pred_t = estimator_t.predict(X)
             pred_c = estimator_c.predict(X)
+
+        p_score = self._predict_propencity(group, X)
 
         return p_score * pred_c + (1 - p_score) * pred_t  
 
