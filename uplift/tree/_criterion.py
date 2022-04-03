@@ -7,38 +7,37 @@ _epsilon = np.finfo('double').eps
 
 
 class Criterion(metaclass=ABCMeta):
+    def __init__(self, groups) -> None:
+        self.groups = groups
+
     @abstractmethod
-    def node_value(self, y, w):
+    def children(self, y, w):
         pass
 
     @abstractmethod
-    def improvement(self,
-                    parent_impurity,
-                    n_left_samples,
-                    left_impurity,
-                    n_right_samples,
-                    right_impurity):
+    def summary(self, 
+                value_left, value_right,
+                size_left, size_right):
         pass
 
 
-class Delta(Criterion):
-    def node_value(self, y, w):
-        nt = (w == 1).sum()
-        nc = (w == 0).sum()
+class DeltaDeltaP(Criterion):
+    def children(self, y, w):
+        sizes = [(w == g).sum() for g in self.groups]
 
-        yt = y[w == 1]
-        yc = y[w == 0]
+        value = 0
+        for group in self.groups:
+            yg = y[(w == group) | (w == 0)]
+            wg = w[(w == group) | (w == 0)]
+            wg[wg == group] = 1
 
-        uplift = yt.mean() - yc.mean() + _epsilon
+            value += sizes[group - 1] * np.abs(yg[wg == 1].mean() - yg[wg == 0].mean())
+        value /= sum(sizes)
 
-        return ((yt.std() + yc.std()) / np.abs(uplift), nt, nc, uplift)
+        return value
 
-    def improvement(self,
-                    parent_impurity,
-                    n_left_samples,
-                    left_impurity,
-                    n_right_samples,
-                    right_impurity):
-        return (parent_impurity
-                - (n_left_samples * left_impurity + n_right_samples * right_impurity) 
-                   / (n_left_samples + n_right_samples))
+    def summary(self,
+                value_left, value_right,
+                size_left, size_right):
+        delta = np.abs(value_left - value_right)            
+        return delta.sum()

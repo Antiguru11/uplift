@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+from turtle import right
 
 import numpy as np
 
@@ -7,7 +8,8 @@ _epsilon = np.finfo('double').eps
 
 
 class Tree():
-    def __init__(self):
+    def __init__(self, n_groups):
+        self.n_groups = n_groups
         self.reset()
 
     def reset(self):
@@ -18,17 +20,15 @@ class Tree():
                  parent,
                  is_left, 
                  is_leaf,
-                 feature,
-                 threshold,
-                 impurity,
-                 n_treatment_samples,
-                 n_control_samples,
-                 uplift, ) -> int:
+                 value,
+                 best_value,
+                 split,
+                 stats) -> int:
         node_id = len(self.nodes)
-        self.nodes.append([node_id,
-                           parent, None, None,
-                           feature, threshold, impurity,
-                           n_treatment_samples, n_control_samples, uplift])
+        self.nodes.append([node_id, parent, None, None,
+                           value, best_value, 
+                           split[0], split[1],
+                           stats[0], stats[1], stats[2]])
 
         if parent is not None:
             if is_left:
@@ -42,7 +42,9 @@ class Tree():
         return node_id
 
     def apply(self, X) -> np.ndarray:
-        uplift = np.full(X.shape[0], np.nan)
+        n_samples, _ = X.shape
+
+        uplift = np.full((n_samples, self.n_groups), np.nan)
 
         for leaf_id in self.leaf_ids:
             mask = np.full(X.shape[0], True, dtype=bool)
@@ -53,26 +55,30 @@ class Tree():
                 mask &= self._apply_node(X, parent_id, child_id)
                 parent_id, child_id = self.nodes[parent_id][1], parent_id
 
-            uplift[mask] = self.nodes[leaf_id][-1]
+            uplift[mask, :] = np.array(self.nodes[leaf_id][-1])
         
         return uplift
 
     def _apply_node(self, X, parent_id, child_id):
         is_left = self.nodes[parent_id][2] == child_id
-        Xi = X[:, self.nodes[parent_id][4]]
-        threshold = self.nodes[parent_id][5]
+        feature, threshold = self.nodes[parent_id][6:8]
 
-        mask = Xi <= threshold if is_left else Xi > threshold
+        Xi = X[:, feature]
 
-        if np.isnan(Xi).any():
-            other_child_id = self.nodes[parent_id][2 if is_left else 3]
+        if np.isnan(threshold):
+            mask = np.isnan(Xi) if is_left else ~np.isnan(Xi)
+        else:
+            mask = Xi <= threshold if is_left else Xi > threshold
 
-            a_impurity = self.nodes[child_id][6]
-            b_impurity = self.nodes[other_child_id][6]
+            if np.isnan(Xi).any():
+                other_child_id = self.nodes[parent_id][2 if is_left else 3]
 
-            if (a_impurity < b_impurity
-                or (np.abs(a_impurity - _epsilon) <= b_impurity and is_left)):
-                mask |= np.isnan(Xi)
+                a_value = self.nodes[child_id][4]
+                b_value = self.nodes[other_child_id][4]
+
+                if (a_value > b_value
+                    or (np.abs(a_value - b_value) <= _epsilon and is_left)):
+                    mask |= np.isnan(Xi)
 
         return mask
 
@@ -96,7 +102,7 @@ class TreeBuilder(metaclass=ABCMeta):
         self.max_leaf_nodes = max_leaf_nodes
 
     @abstractmethod
-    def build(self, tree, X, y, w):
+    def build(self, tree, X, y, w, groups):
         pass
 
 
@@ -116,83 +122,74 @@ class DepthFirstTreeBuilder(TreeBuilder):
                          min_samples_leaf_control,
                          None,)
 
-    def build(self, tree, X, y, w):
+    def build(self, tree, X, y, w, groups):
         tree.reset()
-        self.splitter.initialize(X, y, w)
+        self.splitter.initialize(X, y, w, groups)
 
         stack = list()
         stack.append((np.full_like(y, True, dtype=bool), 
                       0,
                       None,
                       True,
-                      np.inf,
-                      None, 
                       None,
-                      None, ))
+                      (None, None, None),))
         is_first = True
         while len(stack) != 0:
             item = stack.pop()
+            best_value = None
+            split = (None, None)
 
-            idx = item[0]
-            depth = item[1]
-            parent = item[2]
-            is_left = item[3]
-            impurity = item[4]
-            n_treatment_samples = item[5]
-            n_control_samples = item[6]
-            uplift = item[7]
+            idx, depth, parent, is_left, value, stats = item
+            (n_treatments,
+             n_control, 
+             uplift, ) = stats
 
             if is_first:
                 is_first == False
 
-                node_value = self.splitter.node_value(idx)
-
-                impurity = node_value[0]
-                n_treatment_samples = node_value[1]
-                n_control_samples = node_value[2]
-                uplift = node_value[3]
+                (value,
+                 n_treatments,
+                 n_control,
+                 uplift, ) = self.splitter.node_value(idx)
 
             is_leaf = (depth >= self.max_depth 
-                       or (n_treatment_samples + n_control_samples) < self.min_samples_split
-                       or (n_treatment_samples + n_control_samples) < self.min_samples_leaf
-                       or n_treatment_samples < self.min_samples_leaf_treated
-                       or n_control_samples < self.min_samples_leaf_control
-                       or np.abs(impurity) <= _epsilon)
+                       or (sum(n_treatments) + n_control) < self.min_samples_split
+                       or (sum(n_treatments) + n_control) < self.min_samples_leaf
+                       or min(n_treatments) < self.min_samples_leaf_treated
+                       or n_control < self.min_samples_leaf_control)
 
-            feature = None
-            threshold = None
             if not is_leaf:
-                (feature,
-                 threshold,
-                 left,
-                 right,
-                 improvement) = self.splitter.split(idx, impurity)
+                best_value, best_split = self.splitter.split(idx)
+
+                (split,
+                 (idx_left,
+                  value_left,
+                  stats_left,),
+                 (idx_right,
+                  value_right,
+                  stats_right,)) = best_split
                 
-                is_leaf = is_leaf or improvement <= _epsilon
+                is_leaf = is_leaf or best_value <= _epsilon
             
             node_id = tree.add_node(parent, is_left, is_leaf,
-                                    feature, threshold, impurity,
-                                    n_treatment_samples, n_control_samples, uplift)
+                                    value, best_value, split,
+                                    (n_treatments, n_control, uplift))
 
             if is_leaf:
                 continue
             
-            stack.append((left[0],
+            stack.append((idx_left,
                           depth + 1,
                           node_id,
                           True, 
-                          left[1],
-                          left[2],
-                          left[3],
-                          left[4],))
-            stack.append((right[0],
+                          value_left,
+                          stats_left,))
+            stack.append((idx_right,
                           depth + 1,
                           node_id,
                           False, 
-                          right[1],
-                          right[2],
-                          right[3],
-                          right[4],))
+                          value_right,
+                          stats_right,))
 
 
 class BestFirstTreeBuilder(TreeBuilder):
@@ -212,85 +209,77 @@ class BestFirstTreeBuilder(TreeBuilder):
                          min_samples_leaf_control,
                          max_leaf_nodes,)
 
-    def build(self, tree, X, y, w):
+    def build(self, tree, X, y, w, groups):
         tree.reset()
-        self.splitter.initialize(X, y, w)
+        self.splitter.initialize(X, y, w, groups)
 
         stack = list()
         stack.append((np.full_like(y, True, dtype=bool), 
                       0,
                       None,
                       True,
-                      np.inf,
-                      None, 
                       None,
-                      None, ))
+                      (None, None, None),))
         is_first = True
         max_split_nodes = self.max_leaf_nodes - 1
         while len(stack) != 0 and max_split_nodes >= 0:
-            next_id = np.array([si[4] for si in stack]).argmin()
+            next_id = np.array([si[4] for si in stack]).argmax()
             item = stack.pop(next_id)
 
-            idx = item[0]
-            depth = item[1]
-            parent = item[2]
-            is_left = item[3]
-            impurity = item[4]
-            n_treatment_samples = item[5]
-            n_control_samples = item[6]
-            uplift = item[7]
+            best_value = None
+            split = (None, None)
+
+            idx, depth, parent, is_left, value, stats = item
+            (n_treatments,
+             n_control, 
+             uplift, ) = stats
 
             if is_first:
                 is_first == False
 
-                node_value = self.splitter.node_value(idx)
-
-                impurity = node_value[0]
-                n_treatment_samples = node_value[1]
-                n_control_samples = node_value[2]
-                uplift = node_value[3]
+                (value,
+                 n_treatments,
+                 n_control,
+                 uplift, ) = self.splitter.node_value(idx)
 
             is_leaf = (depth >= self.max_depth
                        or max_split_nodes <= 0
-                       or (n_treatment_samples + n_control_samples) < self.min_samples_split
-                       or (n_treatment_samples + n_control_samples) < self.min_samples_leaf
-                       or n_treatment_samples < self.min_samples_leaf_treated
-                       or n_control_samples < self.min_samples_leaf_control
-                       or np.abs(impurity) <= _epsilon)
+                       or (sum(n_treatments) + n_control) < self.min_samples_split
+                       or (sum(n_treatments) + n_control) < self.min_samples_leaf
+                       or min(n_treatments) < self.min_samples_leaf_treated
+                       or n_control < self.min_samples_leaf_control)
 
             if not is_leaf:
-                (feature,
-                 threshold,
-                 left,
-                 right,
-                 improvement) = self.splitter.split(idx, impurity)
+                best_value, best_split = self.splitter.split(idx)
+
+                (split,
+                 (idx_left,
+                  value_left,
+                  stats_left,),
+                 (idx_right,
+                  value_right,
+                  stats_right,)) = best_split
                 
-                is_leaf = is_leaf or improvement <= _epsilon
+                is_leaf = is_leaf or best_value <= _epsilon
             
             node_id = tree.add_node(parent, is_left, is_leaf,
-                                    None if is_leaf else feature,
-                                    None if is_leaf else threshold,
-                                    impurity,
-                                    n_treatment_samples, n_control_samples, uplift)
+                                    value, best_value, split,
+                                    (n_treatments, n_control, uplift))
 
             if is_leaf:
                 continue
             
-            stack.append((left[0],
+            stack.append((idx_left,
                           depth + 1,
                           node_id,
                           True, 
-                          left[1],
-                          left[2],
-                          left[3],
-                          left[4],))
-            stack.append((right[0],
+                          value_left,
+                          stats_left,))
+            stack.append((idx_right,
                           depth + 1,
                           node_id,
                           False, 
-                          right[1],
-                          right[2],
-                          right[3],
-                          right[4],))
+                          value_right,
+                          stats_right,))
             
             max_split_nodes -= 1

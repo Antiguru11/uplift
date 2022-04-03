@@ -7,7 +7,7 @@ from sklearn.utils import check_X_y, check_scalar, check_random_state
 from sklearn.ensemble import BaseEnsemble
 from sklearn.utils.validation import check_is_fitted
 
-from .base import UpliftMixin, RegressorMixin, ClassifierMixin
+from .base import BaseEstimator, RegressorMixin, ClassifierMixin
 from .tree import DecisionTreeRegressor, DecisionTreeClassifier
 
 
@@ -35,7 +35,7 @@ def _parallel_predict(tree, X):
     return tree.predict(X)
 
 
-class BaseForest(BaseEnsemble, UpliftMixin, metaclass=ABCMeta):
+class BaseForest(BaseEnsemble, BaseEstimator, metaclass=ABCMeta):
     def __init__(self,
                  base_estimator,
                  *,
@@ -56,8 +56,7 @@ class BaseForest(BaseEnsemble, UpliftMixin, metaclass=ABCMeta):
         self.random_state = random_state 
 
     def fit(self, X, y, w):
-        X, y = self._validate_data(X, y, force_all_finite='allow-nan')
-        _, w = check_X_y(X, w, force_all_finite='allow-nan')
+        X, y, w = self._validate_data(X, y, w, force_all_finite='allow-nan')
 
         n_samples, self.n_features_in_ = X.shape
         
@@ -130,14 +129,14 @@ class BaseForest(BaseEnsemble, UpliftMixin, metaclass=ABCMeta):
                          prefer='threads',)(delayed(_parallel_predict)(tree, X)
                                             for tree in self.estimators_)
 
-        return np.array(preds).mean(axis=0)
+        return sum(preds) / len(preds)
 
 
 class RandomForestRegressor(BaseForest, RegressorMixin):
     def __init__(self,
                  *,
                  n_estimators: int = 100,
-                 criterion: str = 'delta',
+                 criterion: str = 'delta_delta_p',
                  splitter: str = 'fast',
                  max_depth: int = None,
                  min_samples_split: int = 40,

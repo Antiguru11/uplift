@@ -3,22 +3,22 @@ from abc import ABCMeta, abstractmethod
 
 import numpy as np
 from sklearn.base import BaseEstimator, is_classifier
-from sklearn.utils import check_X_y, check_random_state, check_scalar
+from sklearn.utils import check_random_state, check_scalar
 from sklearn.utils.validation import check_is_fitted
 
 from . import _criterion, _splitter
 from ._tree import Tree, DepthFirstTreeBuilder, BestFirstTreeBuilder
-from ..base import UpliftMixin, ClassifierMixin, RegressorMixin
+from ..base import BaseEstimator, ClassifierMixin, RegressorMixin
 
 
 _criteria_clf = {}
-_criteria_reg = {'delta': _criterion.Delta,}
+_criteria_reg = {'delta_delta_p': _criterion.DeltaDeltaP,}
 
 _splitters = {'best': _splitter.BestSplitter,
               'fast': _splitter.FastSplitter,}
 
 
-class BaseDecisionTree(BaseEstimator, UpliftMixin, metaclass=ABCMeta):
+class BaseDecisionTree(BaseEstimator, metaclass=ABCMeta):
     @abstractmethod
     def __init__(self,
                  *,
@@ -44,8 +44,8 @@ class BaseDecisionTree(BaseEstimator, UpliftMixin, metaclass=ABCMeta):
         self.random_state = random_state
 
     def fit(self, X, y, w):
-        X, y = self._validate_data(X, y, force_all_finite='allow-nan')
-        _, w = check_X_y(X, w, force_all_finite='allow-nan')
+        X, y, w = self._validate_data(X, y, w, reset=True,
+                                      force_all_finite='allow-nan')
 
         is_classification = is_classifier(self)
 
@@ -103,9 +103,9 @@ class BaseDecisionTree(BaseEstimator, UpliftMixin, metaclass=ABCMeta):
         random_state = check_random_state(self.random_state)
 
         if is_classification:
-            criterion = _criteria_clf[self.criterion]()
+            criterion = _criteria_clf[self.criterion](self.groups)
         else:
-            criterion = _criteria_reg[self.criterion]()
+            criterion = _criteria_reg[self.criterion](self.groups)
 
         splitter = _splitters[self.splitter](criterion,
                                              min_samples_leaf,
@@ -114,7 +114,7 @@ class BaseDecisionTree(BaseEstimator, UpliftMixin, metaclass=ABCMeta):
                                              max_features,
                                              random_state)
 
-        self.tree_ = Tree()
+        self.tree_ = Tree(n_groups=self.n_groups)
         if max_leaf_nodes < 0:
             builder = DepthFirstTreeBuilder(splitter,
                                             max_depth,
@@ -131,7 +131,7 @@ class BaseDecisionTree(BaseEstimator, UpliftMixin, metaclass=ABCMeta):
                                            min_samples_leaf_control,
                                            max_leaf_nodes,)
 
-        builder.build(self.tree_, X, y, w)
+        builder.build(self.tree_, X, y, w, self.groups)
 
         return self
 
@@ -140,6 +140,8 @@ class BaseDecisionTree(BaseEstimator, UpliftMixin, metaclass=ABCMeta):
 
         X = self._validate_data(X, reset=False,
                                 force_all_finite='allow-nan')
+        if self.n_groups == 1:
+            return self.tree_.apply(X).reshape(-1)
         return self.tree_.apply(X)
 
     def _more_tags(self):
@@ -149,7 +151,7 @@ class BaseDecisionTree(BaseEstimator, UpliftMixin, metaclass=ABCMeta):
 class DecisionTreeRegressor(RegressorMixin, BaseDecisionTree):
     def __init__(self,
                  *,
-                 criterion: str = 'delta',
+                 criterion: str = 'delta_delta_p',
                  splitter: str = 'best',
                  max_depth: int = None,
                  min_samples_split: int = 40,

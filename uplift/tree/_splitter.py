@@ -2,6 +2,8 @@ from abc import ABCMeta, abstractmethod
 
 import numpy as np
 
+from ._utils import group_stats
+
 
 class Splitter(metaclass=ABCMeta):
     def __init__(self,
@@ -18,10 +20,11 @@ class Splitter(metaclass=ABCMeta):
         self.max_features = max_features
         self.random_state = random_state
 
-    def initialize(self, X, y, w):
+    def initialize(self, X, y, w, groups):
         self.X = X
         self.y = y
         self.w = w
+        self.groups = groups
 
         self.n_features = self.X.shape[1]
         self.constant_features = list()
@@ -32,18 +35,20 @@ class Splitter(metaclass=ABCMeta):
                 self.n_constant_features += 1
 
     def node_value(self, idx):
-        return self.criterion.node_value(self.y[idx], self.w[idx])
+        value = self.criterion.children(self.y[idx], self.w[idx])
+        return tuple([value]) + group_stats(self.y[idx],
+                                            self.w[idx],
+                                            self.groups)
 
     def thresholds(self, Xi):
-        thresholds = np.unique(Xi)
-        if np.isnan(thresholds).any():
-            thresholds = thresholds[~np.isnan(thresholds)]
-        return thresholds
+        return np.unique(Xi).tolist()
 
     @abstractmethod
-    def split(self, idx, impurity):
-        best_split = tuple([None, None, None, None])
-        best_improvement = -np.inf
+    def split(self, idx):
+        best_split = tuple([(None, None),
+                            (None, None, (None, None, None)),
+                            (None, None, (None, None, None)),])
+        best_value = -np.inf
 
         features = [i 
                     for i in range(self.n_features) 
@@ -64,59 +69,79 @@ class Splitter(metaclass=ABCMeta):
                 continue
 
             for threshold in thresholds:
-                left_idx = idx & (Xi <= threshold)
-                right_idx = idx & (Xi > threshold)
+                if np.isnan(threshold):
+                    idx_left = idx & np.isnan(Xi)
+                    idx_right = idx & ~np.isnan(Xi)
+                else:
+                    idx_left = idx & (Xi <= threshold)
+                    idx_right = idx & (Xi > threshold)
 
-                nt_left = (self.w[left_idx] == 1).sum()
-                nc_left = (self.w[left_idx] == 0).sum()
+                (nts_left,
+                 nc_left, 
+                 uplift_left) = group_stats(self.y[idx_left],
+                                            self.w[idx_left],
+                                            self.groups)
+                
+                (nts_right,
+                 nc_right, 
+                 uplift_right) = group_stats(self.y[idx_right],
+                                             self.w[idx_right],
+                                             self.groups)
 
-                nt_right = (self.w[right_idx] == 1).sum()
-                nc_right = (self.w[right_idx] == 0).sum()
-
-                if ((nt_left + nc_left) < self.min_samples_leaf
-                    or nt_left < self.min_samples_leaf_treated
-                    or nc_left < self.min_samples_leaf_control):
+                if ((sum(nts_left) + nc_left) < self.min_samples_leaf
+                    or (sum(nts_right) + nc_right) < self.min_samples_leaf
+                    or min(min(nts_left), min(nts_right)) < self.min_samples_leaf_treated
+                    or min(nc_left, nc_right) < self.min_samples_leaf_control):
                     continue
-                if ((nt_right + nc_right) < self.min_samples_leaf
-                    or nt_right < self.min_samples_leaf_treated
-                    or nc_right < self.min_samples_leaf_control):
-                    continue
 
-                left = self.node_value(left_idx)
-                right = self.node_value(right_idx)
+                value_left = self.criterion.children(self.y[idx_left],
+                                                     self.w[idx_left])
+                value_right = self.criterion.children(self.y[idx_right],
+                                                      self.w[idx_right])
 
-                improvement = self.criterion.improvement(impurity,
-                                                         nt_left + nc_left,
-                                                         left[0],
-                                                         nt_right + nc_right,
-                                                         right[0],)
+                value = self.criterion.summary(value_left, value_right,
+                                               idx_left.sum(), idx_right.sum())
 
-                if improvement > best_improvement:
-                    best_improvement = improvement
-                    best_split = (feature,
-                                  threshold,
-                                  tuple([left_idx]) + left,
-                                  tuple([right_idx]) + right, )
+                if value > best_value:
+                    best_value = value
+                    best_split = ((feature, threshold),
+                                  tuple([idx_left,
+                                         value_left,
+                                         (nts_left,
+                                          nc_left,
+                                          uplift_left)]),
+                                  tuple([idx_right,
+                                         value_right,
+                                         (nts_right,
+                                          nc_right,
+                                          uplift_right)]))
 
             n_visited_features += 1
         
-        return best_split + tuple([best_improvement])
+        return best_value, best_split
 
 
 class BestSplitter(Splitter):
-    def split(self, idx, impurity):
-        return super().split(idx, impurity)
+    def split(self, idx):
+        return super().split(idx)
 
 
 class FastSplitter(Splitter):
     def thresholds(self, Xi):
-        thresholds = super().thresholds(Xi)
-        if len(thresholds) > 10:
-            percentiles = np.percentile(thresholds,
-                                        [3, 5, 10, 20, 30, 50, 70, 80, 90, 95, 97])
-        else:
-            percentiles = np.percentile(thresholds, [10, 50, 90])
-        return np.unique(percentiles)
+        have_nan = np.isnan(Xi).any()
 
-    def split(self, idx, impurity):
-        return super().split(idx, impurity)
+        values = Xi[~np.isnan(Xi)]
+        if len(values) > 10:
+            thresholds = np.percentile(values,
+                                       [3, 5, 10, 20, 30, 50, 70, 80, 90, 95, 97])
+        else:
+            thresholds = np.percentile(values, [10, 50, 90])
+        
+        thresholds = np.unique(thresholds).tolist()
+        if have_nan:
+            thresholds = [np.nan] + thresholds
+
+        return thresholds
+
+    def split(self, idx):
+        return super().split(idx)
