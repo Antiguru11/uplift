@@ -8,14 +8,14 @@ from .utils import check_w
 class BaseEstimator(_BaseEstimator, MultiOutputMixin):
     def _validate_data(self,
                        X,
-                       y = None,
-                       w = None,
+                       y = "no_validation",
+                       w = "no_validation",
                        reset=True,
                        **check_params):
         out = super()._validate_data(X, y,
                                      reset=reset,
                                      **check_params)
-        if w is not None:
+        if not (isinstance(w, str) and w == 'no_validation'):
             w, groups = check_w(w)
             check_consistent_length(X, y, w)
 
