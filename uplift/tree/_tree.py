@@ -1,5 +1,4 @@
 from abc import ABCMeta, abstractmethod
-from turtle import right
 
 import numpy as np
 
@@ -17,16 +16,12 @@ class Tree():
         self.leaf_ids = list()
 
     def add_node(self,
-                 parent,
-                 is_left, 
-                 is_leaf,
-                 value,
-                 best_value,
-                 split,
-                 stats) -> int:
+                 parent, is_left, is_leaf,
+                 value, gain,
+                 split, stats) -> int:
         node_id = len(self.nodes)
         self.nodes.append([node_id, parent, None, None,
-                           value, best_value, 
+                           value, gain,
                            split[0], split[1],
                            stats[0], stats[1], stats[2]])
 
@@ -136,10 +131,11 @@ class DepthFirstTreeBuilder(TreeBuilder):
         is_first = True
         while len(stack) != 0:
             item = stack.pop()
-            best_value = None
-            split = (None, None)
+            gain = None
+            feature, threshold = None, None
 
-            idx, depth, parent, is_left, value, stats = item
+            (idx, depth, parent, is_left,
+             value, stats,) = item
             (n_treatments,
              n_control, 
              uplift, ) = stats
@@ -159,20 +155,20 @@ class DepthFirstTreeBuilder(TreeBuilder):
                        or n_control < self.min_samples_leaf_control)
 
             if not is_leaf:
-                best_value, best_split = self.splitter.split(idx)
+                gain, split = self.splitter.split(idx, value)
 
-                (split,
+                ((feature, threshold),
                  (idx_left,
                   value_left,
                   stats_left,),
                  (idx_right,
                   value_right,
-                  stats_right,)) = best_split
+                  stats_right,)) = split
                 
-                is_leaf = is_leaf or best_value <= _epsilon
+                is_leaf = is_leaf or gain <= _epsilon
             
             node_id = tree.add_node(parent, is_left, is_leaf,
-                                    value, best_value, split,
+                                    value, gain, (feature, threshold),
                                     (n_treatments, n_control, uplift))
 
             if is_leaf:
@@ -226,10 +222,11 @@ class BestFirstTreeBuilder(TreeBuilder):
             next_id = np.array([si[4] for si in stack]).argmax()
             item = stack.pop(next_id)
 
-            best_value = None
-            split = (None, None)
+            gain = None
+            feature, threshold = None, None
 
-            idx, depth, parent, is_left, value, stats = item
+            (idx, depth, parent, is_left,
+             value, stats,) = item
             (n_treatments,
              n_control, 
              uplift, ) = stats
@@ -250,20 +247,20 @@ class BestFirstTreeBuilder(TreeBuilder):
                        or n_control < self.min_samples_leaf_control)
 
             if not is_leaf:
-                best_value, best_split = self.splitter.split(idx)
+                gain, split = self.splitter.split(idx, value)
 
-                (split,
+                ((feature, threshold),
                  (idx_left,
                   value_left,
                   stats_left,),
                  (idx_right,
                   value_right,
-                  stats_right,)) = best_split
+                  stats_right,)) = split
                 
-                is_leaf = is_leaf or best_value <= _epsilon
+                is_leaf = is_leaf or gain <= _epsilon
             
             node_id = tree.add_node(parent, is_left, is_leaf,
-                                    value, best_value, split,
+                                    value, gain, (feature, threshold),
                                     (n_treatments, n_control, uplift))
 
             if is_leaf:

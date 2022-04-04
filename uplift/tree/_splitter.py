@@ -35,7 +35,7 @@ class Splitter(metaclass=ABCMeta):
                 self.n_constant_features += 1
 
     def node_value(self, idx):
-        value = self.criterion.children(self.y[idx], self.w[idx])
+        value = self.criterion.value(self.y[idx], self.w[idx])
         return tuple([value]) + group_stats(self.y[idx],
                                             self.w[idx],
                                             self.groups)
@@ -44,11 +44,11 @@ class Splitter(metaclass=ABCMeta):
         return np.unique(Xi).tolist()
 
     @abstractmethod
-    def split(self, idx):
+    def split(self, idx, value_parent):
         best_split = tuple([(None, None),
                             (None, None, (None, None, None)),
                             (None, None, (None, None, None)),])
-        best_value = -np.inf
+        best_gain = -np.inf
 
         features = [i 
                     for i in range(self.n_features) 
@@ -94,16 +94,17 @@ class Splitter(metaclass=ABCMeta):
                     or min(nc_left, nc_right) < self.min_samples_leaf_control):
                     continue
 
-                value_left = self.criterion.children(self.y[idx_left],
-                                                     self.w[idx_left])
-                value_right = self.criterion.children(self.y[idx_right],
-                                                      self.w[idx_right])
+                value_left = self.criterion.value(self.y[idx_left],
+                                                  self.w[idx_left])
+                value_right = self.criterion.value(self.y[idx_right],
+                                                   self.w[idx_right])
 
-                value = self.criterion.summary(value_left, value_right,
-                                               idx_left.sum(), idx_right.sum())
+                gain = self.criterion.gain(value_parent,
+                                           value_left, value_right,
+                                           idx_left.sum(), idx_right.sum())
 
-                if value > best_value:
-                    best_value = value
+                if gain > best_gain:
+                    best_gain = gain
                     best_split = ((feature, threshold),
                                   tuple([idx_left,
                                          value_left,
@@ -118,12 +119,12 @@ class Splitter(metaclass=ABCMeta):
 
             n_visited_features += 1
         
-        return best_value, best_split
+        return best_gain, best_split
 
 
 class BestSplitter(Splitter):
-    def split(self, idx):
-        return super().split(idx)
+    def split(self, idx, value_parent):
+        return super().split(idx, value_parent)
 
 
 class FastSplitter(Splitter):
@@ -134,8 +135,10 @@ class FastSplitter(Splitter):
         if len(values) > 10:
             thresholds = np.percentile(values,
                                        [3, 5, 10, 20, 30, 50, 70, 80, 90, 95, 97])
-        else:
+        elif len(values) != 0:
             thresholds = np.percentile(values, [10, 50, 90])
+        else:
+            thresholds = list()
         
         thresholds = np.unique(thresholds).tolist()
         if have_nan:
@@ -143,5 +146,5 @@ class FastSplitter(Splitter):
 
         return thresholds
 
-    def split(self, idx):
-        return super().split(idx)
+    def split(self, idx, value_parent):
+        return super().split(idx, value_parent)

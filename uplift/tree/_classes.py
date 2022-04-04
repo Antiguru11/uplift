@@ -11,7 +11,10 @@ from ._tree import Tree, DepthFirstTreeBuilder, BestFirstTreeBuilder
 from ..base import BaseEstimator, ClassifierMixin, RegressorMixin
 
 
-_criteria_clf = {}
+_criteria_clf = {'delta_delta_p': _criterion.DeltaDeltaP,
+                 'kl_divergence': _criterion.KLDivergence,
+                 'euclidean_divergence': _criterion.EuclideanDivergence,
+                 'chi2_divergence': _criterion.Chi2Divergence,}
 _criteria_reg = {'delta_delta_p': _criterion.DeltaDeltaP,}
 
 _splitters = {'best': _splitter.BestSplitter,
@@ -174,4 +177,25 @@ class DecisionTreeRegressor(RegressorMixin, BaseDecisionTree):
 
 
 class DecisionTreeClassifier(ClassifierMixin, BaseDecisionTree):
-    pass
+    def __init__(self,
+                 *,
+                 criterion: str = 'delta_delta_p',
+                 splitter: str = 'best',
+                 max_depth: int = None,
+                 min_samples_split: int = 40,
+                 min_samples_leaf: int = 20,
+                 min_samples_leaf_treated: int = 10,
+                 min_samples_leaf_control: int = 10,
+                 max_features: int = None,
+                 max_leaf_nodes: int = None,
+                 random_state: int = None):
+        super().__init__(criterion=criterion,
+                         splitter=splitter,
+                         max_depth=max_depth,
+                         min_samples_split=min_samples_split,
+                         min_samples_leaf=min_samples_leaf,
+                         min_samples_leaf_treated=min_samples_leaf_treated,
+                         min_samples_leaf_control=min_samples_leaf_control,
+                         max_features=max_features,
+                         max_leaf_nodes=max_leaf_nodes,
+                         random_state=random_state)
