@@ -179,4 +179,46 @@ class RandomForestRegressor(BaseForest, RegressorMixin):
 
 
 class RandomForestClassifier(BaseForest, ClassifierMixin):
-    pass
+    def __init__(self,
+                 *,
+                 n_estimators: int = 100,
+                 criterion: str = 'kl_divergence',
+                 splitter: str = 'fast',
+                 max_depth: int = None,
+                 min_samples_split: int = 40,
+                 min_samples_leaf: int = 20,
+                 min_samples_leaf_treated: int = 10,
+                 min_samples_leaf_control: int = 10,
+                 max_features: int = None,
+                 max_leaf_nodes: int = None,
+                 samples_by_estimator: int = None,
+                 features_by_estimator: int = None,
+                 n_jobs: int = None,
+                 verbose: int = None,
+                 random_state: int = None):
+        super().__init__(base_estimator=DecisionTreeClassifier(),
+                         n_estimators=n_estimators,
+                         estimator_params=('criterion',
+                                           'splitter',
+                                           'max_depth',
+                                           'min_samples_split',
+                                           'min_samples_leaf',
+                                           'min_samples_leaf_treated',
+                                           'min_samples_leaf_control',
+                                           'max_features',
+                                           'max_leaf_nodes',
+                                           'random_state',),
+                         samples_by_estimator=samples_by_estimator,
+                         features_by_estimator=features_by_estimator,
+                         n_jobs=n_jobs,
+                         verbose=verbose,
+                         random_state=random_state)
+        self.criterion = criterion
+        self.splitter = splitter
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.min_samples_leaf_treated = min_samples_leaf_treated
+        self.min_samples_leaf_control = min_samples_leaf_control
+        self.max_features = max_features
+        self.max_leaf_nodes = max_leaf_nodes

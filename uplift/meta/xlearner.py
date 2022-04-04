@@ -63,12 +63,8 @@ class XLearner(BaseLearner):
         estimator_t = self.estimators[group - 1][0]
         estimator_c = self.estimators[group - 1][1]
 
-        if is_classifier(self):
-            pred_t = estimator_t.predict_proba(X)[:, 1]
-            pred_c = estimator_c.predict_proba(X)[:, 1]
-        else:
-            pred_t = estimator_t.predict(X)
-            pred_c = estimator_c.predict(X)
+        pred_t = estimator_t.predict(X)
+        pred_c = estimator_c.predict(X)
 
         p_score = self._predict_propencity(group, X)
 
@@ -76,7 +72,53 @@ class XLearner(BaseLearner):
 
 
 class XClassifier(XLearner, ClassifierMixin):
-    pass
+    def _make_estimators(self):
+        if self.estimator is not None:
+            for e in self.estimators_params:
+                if 'alpha' in e:
+                    setattr(self, e, clone(self.estimator[0]))
+                if 'beta' in e:
+                    setattr(self, e, clone(self.estimator[1]))
+
+        if len(self.estimators_params) != 0:
+            self.estimator = None
+        else:
+            self.estimators_params = ('estimator',)
+
+    def _check_params(self):
+        params = dict()
+
+        for e in self.estimators_params:
+            if getattr(self, e) is None:
+                raise ValueError(f'Estimator {e} is None')
+
+            if 'alpha' in e:
+                if is_classifier(self) != is_classifier(getattr(self, e)):
+                    raise ValueError(f'Estimator {e} must be '
+                                    + ('classifier' if is_classifier(self) else 'regressor'))
+            if 'beta' in e:
+                if is_classifier(getattr(self, e)):
+                    raise ValueError(f'Estimator {e} must be regressor')
+
+        if self.propencity:
+            if self.propencity_score is None:
+                if self.propencity_estimator is None:
+                    raise ValueError('Estimator for propencity is None')
+                if not is_classifier(self.propencity_estimator):
+                    raise ValueError('Estimator for propencity must be classifier')
+            else:
+                if not isinstance(self.propencity_score, list):
+                    self.propencity_score = [self.propencity_score]
+                
+                if len(self.propencity_score) != self.n_groups:
+                    raise ValueError('Propencity vector must have same lenght as groups')
+                for score in self.propencity_score:
+                    check_scalar(score,
+                                 'propencity_score', float,
+                                 min_val=0, max_val=1,
+                                 include_boundaries='neither')
+
+        return params
 
 
 class XRegressor(XLearner, RegressorMixin):
