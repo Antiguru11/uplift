@@ -1,4 +1,4 @@
-FROM --platform=amd64 continuumio/miniconda3:latest
+FROM continuumio/miniconda3:latest
 
 # RUN apt-get update 
 
